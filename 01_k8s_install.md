@@ -14,6 +14,21 @@
 | node3  | 10.23.203.186 | 2C 4G | centos8 |
 
 
+#### hostname
+```bash
+#!/bin/bash
+export node_name=$1
+hostnamectl set-hostname $node_name
+cat <<EOF >> /etc/hosts
+192.168.44.97 node1
+192.168.44.161 node2
+192.168.44.85 node3
+EOF
+setenforce 0
+sed -i --follow-symlinks 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/sysconfig/selinux
+```
+
+
 #### 安装源
 ```bash
 # 添加 k8s 安装源
