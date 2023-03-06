@@ -36,13 +36,6 @@ downloadFile() {
 }
 ```
 
-### 安装kong
-官网地址 https://github.com/Kong/kubernetes-ingress-controller
-```bash
-$ helm repo add kong https://charts.konghq.com
-$ helm repo update
-$ helm install kong/kong --generate-name --set ingressController.installCRDs=false
-```
 ### 安装psql
 - nfs
 ```bash
@@ -65,6 +58,7 @@ exportfs
 systemctl enable rpcbind && systemctl start rpcbind
 
 systemctl enable nfs && systemctl start nfs
+systemctl enable nfs-server && systemctl start nfs-server
 ```
 
 - storage
@@ -112,9 +106,9 @@ global:
   postgresql:
     auth:
       postgresPassword: "ucloud.cn"
-      username: "konga"
+      username: "ucloud"
       password: "ucloud.cn"
-      database: "konga"
+      database: "kong"
 image:
   tag: 12.14.0-debian-11-r2
 EOF
@@ -122,24 +116,75 @@ helm install ps-db bitnami/postgresql \
 -f my-values.yaml
 ```
 
-### 安装konga
-https://github.com/dangtrinhnt/konga-helm-chart
+### 安装kong
+官网地址 https://github.com/Kong/kubernetes-ingress-controller
+注释里有以下注意点 
+- 1 有两种方式dbless和指定数据库
+- 2 推荐使用自建数据库 通过env变量
+```
+# Kong can run without a database or use either Postgres or Cassandra
+# as a backend datatstore for it's configuration.
+# By default, this chart installs Kong without a database.
+
+# If you would like to use a database, there are two options:
+# - (recommended) Deploy and maintain a database and pass the connection
+#   details to Kong via the `env` section.
+# - You can use the below `postgresql` sub-chart to deploy a database
+#   along-with Kong as part of a single Helm release. Running a database
+#   independently is recommended for production, but the built-in Postgres is
+#   useful for quickly creating test instances.
+```
+
 ```bash
-cat << EOF> konga-valus.yaml
-config: {}
-  port: 1337
-  node_env: production
-  db_adapter: postgres
-  db_host: ps-db-postgresql.default.svc.cluster.local
-  db_port: 5432
-  db_user: konga
-  db_password: ucloud.cn
-  db_database: konga
-EOF
-helm install konga ./ -f konga-valus.yaml
+$ helm repo add kong https://charts.konghq.com
+$ helm repo update
+#$ helm install kong/kong --generate-name --set ingressController.installCRDs=false
+# 我直接pull了chart包 然后修改values.yaml的文件 主要修改了两处 一个是不采用dbless 一个是svc使用nodeport
+# --- values.yaml ---
+env:
+  database: "postgres"
+  pg_host: ps-db-postgresql.default.svc.cluster.local
+  pg_port: 5432
+  pg_user: ucloud
+  pg_password: ucloud.cn
+  pg_database: kong
+
+proxy:
+  # Enable creating a Kubernetes service for the proxy
+  enabled: true
+  #type: LoadBalancer
+  type: NodePort
+# --- values.yaml ---
+
+kubectl create namespace kong
+helm install gateway ./ --namespace kong -f values.yaml --set ingressController.installCRDs=false
+#helm install gateway kong/kong --namespace kong --set ingressController.installCRDs=false
+
+### 安装结束输出
+NAME: gateway
+LAST DEPLOYED: Mon Mar  6 14:52:42 2023
+NAMESPACE: default
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+NOTES:
+To connect to Kong, please execute the following commands:
+
+HOST=$(kubectl get svc --namespace default gateway-kong-proxy -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+PORT=$(kubectl get svc --namespace default gateway-kong-proxy -o jsonpath='{.spec.ports[0].port}')
+export PROXY_IP=${HOST}:${PORT}
+curl $PROXY_IP
+
+Once installed, please follow along the getting started guide to start using
+Kong: https://docs.konghq.com/kubernetes-ingress-controller/latest/guides/getting-started/
 ```
 
 
+### 安装konga
+https://github.com/dangtrinhnt/konga-helm-chart
+- 注 此方法不通 还是使用kubectl apply 部署
+- 不部署konga了 不支持高版本的kong
+部署
 ```bash
 cat << EOF> konga-deployment.yml 
 apiVersion: apps/v1
@@ -179,7 +224,10 @@ spec:
 EOF
 
 kubectl apply -f konga-deployment.yml 
+```
 
+开放svc
+```bash
 cat <<EOF> svc.yml 
 kind: Service
 apiVersion: v1
